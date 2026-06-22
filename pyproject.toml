@@ -1,0 +1,27 @@
+[project]
+name = "pdfxlsx"
+version = "1.0.0"
+description = "Offline PDF to editable XLSX converter for Windows"
+requires-python = ">=3.11,<3.13"
+readme = "README_RU.md"
+license = { text = "MIT" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+src = ["src", "tests", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "gui: tests that require a Qt platform plugin",
+    "smoke: smoke test of a built/frozen application",
+]
