@@ -10,9 +10,13 @@ whatever fonts happen to be installed on the runner.
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
 
-import pytest
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from pathlib import Path  # noqa: E402
+
+import pytest  # noqa: E402
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase import pdfmetrics
@@ -82,6 +86,31 @@ def make_borderless_pdf(tmp_path):
         return out
 
     return _make
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """A single shared QApplication for the test session (Qt forbids more than one)."""
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    yield app
+
+
+@pytest.fixture
+def qtbot_sleep(qapp):
+    """Block until a QThread finishes, pumping the event loop so its signals are delivered."""
+
+    def _wait(thread, timeout_ms: int = 10000) -> None:
+        elapsed = 0
+        step_ms = 20
+        while thread.isRunning() and elapsed < timeout_ms:
+            qapp.processEvents()
+            thread.wait(step_ms)
+            elapsed += step_ms
+        qapp.processEvents()
+
+    return _wait
 
 
 @pytest.fixture
