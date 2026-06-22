@@ -21,6 +21,7 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tools"]
+addopts = ["-m", "not smoke"]
 markers = [
     "gui: tests that require a Qt platform plugin",
     "smoke: smoke test of a built/frozen application",

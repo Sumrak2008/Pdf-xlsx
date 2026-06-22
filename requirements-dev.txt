@@ -5,6 +5,9 @@
 reportlab==4.2.5
 pypdf==5.1.0
 pyinstaller==6.11.1
+# Needed on Python <3.12: setuptools._vendor.jaraco.context imports this at
+# runtime (via PyInstaller's pkg_resources hook) but does not vendor it.
+backports.tarfile==1.2.0
 ruff==0.7.4
 pytest==8.3.3
 pytest-cov==6.0.0

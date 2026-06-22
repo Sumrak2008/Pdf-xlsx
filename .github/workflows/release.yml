@@ -1,0 +1,37 @@
+name: Release (Windows portable build)
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build portable Windows distribution
+        shell: pwsh
+        run: ./tools/build_windows.ps1
+
+      - name: Upload build artifacts (for inspection even without a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: PdfXlsx-windows-x64
+          path: artifacts/*
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: artifacts/*
+          generate_release_notes: true
