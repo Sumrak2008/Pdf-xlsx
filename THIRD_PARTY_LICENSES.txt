@@ -1,0 +1,129 @@
+PdfXlsx - Third-Party License Notices
+======================================
+
+This file lists the third-party software used by PdfXlsx, split into what
+is actually bundled inside the shipped Windows distribution and what is
+used only during development or the build process (and therefore never
+ships to end users). Exact pinned versions are in requirements.txt and
+requirements-dev.txt.
+
+This file identifies each component's license; it does not reproduce full
+license texts verbatim (each package's own distribution carries its
+complete license text, e.g. under site-packages/<package>-*.dist-info/ or
+the project's own repository). Before cutting an official release, re-
+generate a verbatim bundle with a tool such as `pip-licenses` and ship it
+alongside this file if full text reproduction is required by a specific
+distribution channel's policy.
+
+
+PART 1 - Bundled inside the shipped Windows application
+=========================================================
+
+Python packages (requirements.txt), bundled by PyInstaller:
+
+  PySide6 (Qt for Python)        LGPL-3.0-only
+      https://pypi.org/project/PySide6/
+      Distributed under the LGPLv3 terms of the Qt for Python project.
+      PdfXlsx links against the unmodified, dynamically-loaded Qt/PySide6
+      libraries (PyInstaller's --onedir build keeps them as separate DLL
+      files in the _internal/ folder, not statically embedded into one
+      binary), satisfying the LGPLv3 requirement that a user be able to
+      relink/replace the library.
+
+  pdfplumber                      MIT
+      https://pypi.org/project/pdfplumber/
+
+  pypdfium2                       Apache-2.0 OR BSD-3-Clause
+      https://pypi.org/project/pypdfium2/
+      Python bindings for Google's PDFium PDF rendering library.
+
+  pytesseract                     Apache-2.0
+      https://pypi.org/project/pytesseract/
+      A thin wrapper that invokes the separate, bundled Tesseract OCR
+      binary as a local subprocess (see below) - it does not itself
+      contain the OCR engine.
+
+  openpyxl                        MIT
+      https://pypi.org/project/openpyxl/
+
+  opencv-python-headless          Apache-2.0
+      https://pypi.org/project/opencv-python-headless/
+      Wheel distribution of OpenCV (Apache-2.0 since OpenCV 4.5), built
+      without GUI/display dependencies, matching the offline/headless
+      nature of this application.
+
+  numpy                            BSD-3-Clause
+      https://pypi.org/project/numpy/
+
+  Pillow                           HPND (historical PIL/Pillow license)
+      https://pypi.org/project/Pillow/
+
+Native binaries, bundled by tools/build_windows.ps1 (not by PyInstaller):
+
+  Tesseract OCR engine             Apache-2.0
+      https://github.com/tesseract-ocr/tesseract
+      The tesseract.exe binary and its DLLs, obtained via the Chocolatey
+      "tesseract" community package at build time and copied into
+      tools/tesseract/ of the shipped folder.
+
+  Tesseract language data          Apache-2.0
+      https://github.com/tesseract-ocr/tessdata_fast
+      eng.traineddata, rus.traineddata, osd.traineddata, downloaded
+      directly from the official tessdata_fast distribution at build time.
+
+PyInstaller runtime (bootloader embedded into PdfXlsx.exe):
+
+  PyInstaller bootloader           GPL-2.0-or-later, WITH the PyInstaller
+                                    bootloader exception
+      https://pyinstaller.org/en/stable/license.html
+      The bootloader exception explicitly permits distributing the
+      compiled bootloader as part of a closed-source or differently-
+      licensed final application; only the bootloader itself (not
+      PdfXlsx's own code) is GPL-licensed.
+
+
+PART 2 - Used only for development, testing, or the build process
+====================================================================
+(NOT included in the shipped dist/PdfXlsx/ folder)
+
+  reportlab                        BSD-3-Clause-ish (ReportLab license)
+      https://pypi.org/project/reportlab/
+      Used only by tools/synthetic_pdfs.py to generate synthetic test PDFs.
+
+  pypdf                            BSD-3-Clause
+      https://pypi.org/project/pypdf/
+      Used only by tools/synthetic_pdfs.py (merging/rotating/encrypting
+      synthetic test PDFs) and by the development toolchain - not imported
+      by the shipped application.
+
+  backports.tarfile                MIT
+      https://pypi.org/project/backports.tarfile/
+      Build-time-only dependency required by a PyInstaller/setuptools
+      runtime hook on Python <3.12; not part of the application's own
+      functionality.
+
+  PyInstaller (the build tool itself, as opposed to its embedded
+  bootloader artifact described in Part 1)
+                                    GPL-2.0-or-later, WITH the PyInstaller
+                                    bootloader exception
+      https://pyinstaller.org/
+
+  ruff                              MIT
+      https://pypi.org/project/ruff/
+
+  pytest, pytest-cov                MIT
+      https://pypi.org/project/pytest/
+      https://pypi.org/project/pytest-cov/
+
+  DejaVu fonts (tools/fonts/)       Bitstream Vera License and public-
+                                    domain Arev modifications
+      https://dejavu-fonts.github.io/
+      See tools/fonts/DEJAVU_LICENSE.txt for the full text. Used only by
+      tools/synthetic_pdfs.py to render text in generated test PDFs;
+      never bundled into the shipped application.
+
+  Chocolatey                        Apache-2.0 (the Chocolatey client)
+      https://chocolatey.org/
+      Used only as a build-time package manager to install the Tesseract
+      OCR engine on the CI/build machine; not bundled or referenced by the
+      shipped application in any way.
