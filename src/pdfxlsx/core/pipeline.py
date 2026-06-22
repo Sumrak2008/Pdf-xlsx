@@ -69,7 +69,8 @@ def _open_pdf(pdf_path: Path) -> pdfplumber.PDF:
         return pdfplumber.open(str(pdf_path))
     except Exception as exc:
         message = str(exc).lower()
-        if "password" in message or "encrypt" in message:
+        type_name = type(exc).__name__.lower()
+        if "password" in message or "encrypt" in message or "password" in type_name:
             raise EncryptedPdfError(pdf_path.name) from exc
         raise CorruptPdfError(pdf_path.name, technical_detail=str(exc)) from exc
 
