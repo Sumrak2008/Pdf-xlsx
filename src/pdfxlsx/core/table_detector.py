@@ -99,7 +99,7 @@ def detect_grid(image: Image.Image, dpi: int = DEFAULT_DPI) -> tuple[list[int], 
     if len(row_ys) < MIN_GRID_SIZE or len(col_xs) < MIN_GRID_SIZE:
         return None
 
-    row_ys, col_xs = _filter_spurious_lines(horizontal, vertical, row_ys, col_xs)
+    row_ys, col_xs = _filter_spurious_lines(horizontal, vertical, row_ys, col_xs, dpi=dpi)
     if len(row_ys) < MIN_GRID_SIZE or len(col_xs) < MIN_GRID_SIZE:
         return None
     return sorted(row_ys), sorted(col_xs)
@@ -123,6 +123,24 @@ scattered runs - so checking run length instead of total coverage tells
 the two apart correctly in both cases.
 """
 
+SPURIOUS_LINE_MIN_RUN_INCHES = 0.5
+"""A second, absolute floor on the run-length check above, in inches at the
+page's render DPI.
+
+The fraction above breaks down for a table with one dominant wide column
+(e.g. a "Описание"/"Наименование" column spanning a third of the table) and
+several narrow ones: a divider that only crosses 2-3 of those narrow columns
+is a perfectly genuine ruled line - hundreds of pixels long, the same kind
+of mark as every other row divider in the table - but as a fraction of the
+*full* table width it can fall just under 15% anyway. Incidental glyph
+alignment, by contrast, never produces a run anywhere near this long
+regardless of how wide the table is (it tops out at a single kernel-length
+run from one coincidentally-aligned word). Keeping whichever of the two
+thresholds is smaller preserves the fraction's tighter, size-appropriate
+bound on ordinary tables while stopping it from rejecting genuine partial
+dividers on wide, unevenly-columned ones.
+"""
+
 
 def _longest_run(segment: np.ndarray) -> int:
     if segment.size == 0:
@@ -135,15 +153,20 @@ def _longest_run(segment: np.ndarray) -> int:
 
 
 def _filter_spurious_lines(
-    horizontal_mask: np.ndarray, vertical_mask: np.ndarray, row_ys: list[int], col_xs: list[int]
+    horizontal_mask: np.ndarray,
+    vertical_mask: np.ndarray,
+    row_ys: list[int],
+    col_xs: list[int],
+    dpi: int = DEFAULT_DPI,
 ) -> tuple[list[int], list[int]]:
     """Drop candidate grid lines that are just incidental text-glyph
     alignment rather than an actual ruled line (see
-    `SPURIOUS_LINE_MIN_RUN_FRACTION`)."""
+    `SPURIOUS_LINE_MIN_RUN_FRACTION` and `SPURIOUS_LINE_MIN_RUN_INCHES`)."""
     col_min, col_max = col_xs[0], col_xs[-1]
     row_min, row_max = row_ys[0], row_ys[-1]
-    row_threshold = SPURIOUS_LINE_MIN_RUN_FRACTION * (col_max - col_min)
-    col_threshold = SPURIOUS_LINE_MIN_RUN_FRACTION * (row_max - row_min)
+    absolute_floor = dpi * SPURIOUS_LINE_MIN_RUN_INCHES
+    row_threshold = min(SPURIOUS_LINE_MIN_RUN_FRACTION * (col_max - col_min), absolute_floor)
+    col_threshold = min(SPURIOUS_LINE_MIN_RUN_FRACTION * (row_max - row_min), absolute_floor)
     kept_rows = [y for y in row_ys if _longest_run(horizontal_mask[y, col_min:col_max] > 0) >= row_threshold]
     kept_cols = [x for x in col_xs if _longest_run(vertical_mask[row_min:row_max, x] > 0) >= col_threshold]
     return kept_rows, kept_cols
