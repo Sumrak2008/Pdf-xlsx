@@ -16,7 +16,10 @@ invented.
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
+import zipfile
 
 from openpyxl import Workbook
 from openpyxl.comments import Comment
@@ -28,6 +31,61 @@ from pdfxlsx.core.config import ConversionSettings, SheetSplitMode
 from pdfxlsx.core.models import DocumentResult, TypedTable
 
 UNCERTAIN_FILL = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+
+# openpyxl writes VML comment-drawing elements via namespace URIs only, with
+# no prefix registered, so the serializer falls back to auto-generated
+# ns0/ns1/ns2 prefixes. That is valid XML, but Excel's legacy VML reader
+# (the format predates real namespace support) matches these prefixes
+# literally rather than by URI, so it can't find its own shapes and the
+# whole file gets flagged as unreadable. Canonicalizing to the v:/o:/x:
+# prefixes real Excel/Microsoft-authored VML always uses fixes this.
+_VML_CANONICAL_PREFIXES = {
+    "urn:schemas-microsoft-com:vml": "v",
+    "urn:schemas-microsoft-com:office:office": "o",
+    "urn:schemas-microsoft-com:office:excel": "x",
+}
+
+
+def _canonicalize_vml_prefixes(vml_bytes: bytes) -> bytes:
+    text = vml_bytes.decode("utf-8")
+    declared = dict(re.findall(r'xmlns:(\w+)="([^"]+)"', text))
+    for uri, canonical in _VML_CANONICAL_PREFIXES.items():
+        old_prefix = next((p for p, u in declared.items() if u == uri), None)
+        if old_prefix is None or old_prefix == canonical:
+            continue
+        text = text.replace(f"xmlns:{old_prefix}=", f"xmlns:{canonical}=")
+        text = text.replace(f"{old_prefix}:", f"{canonical}:")
+    return text.encode("utf-8")
+
+
+def _fix_comment_vml_drawings(xlsx_path: str) -> None:
+    """Rewrite VML comment-drawing prefixes in an already-saved workbook.
+
+    Must run as a post-processing pass after `wb.save()`: openpyxl's own
+    comment/VML writer is what produces the malformed prefixes, and it
+    offers no hook to influence that part of its serialization.
+    """
+    with zipfile.ZipFile(xlsx_path, "r") as archive:
+        names = archive.namelist()
+        if not any(name.startswith("xl/drawings/commentsDrawing") for name in names):
+            return
+        contents = {name: archive.read(name) for name in names}
+
+    for name, data in contents.items():
+        if name.startswith("xl/drawings/commentsDrawing") and name.endswith(".vml"):
+            contents[name] = _canonicalize_vml_prefixes(data)
+
+    out_dir = os.path.dirname(xlsx_path) or "."
+    fd, tmp_path = tempfile.mkstemp(suffix=".xlsx", dir=out_dir)
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, data in contents.items():
+                archive.writestr(name, data)
+        os.replace(tmp_path, xlsx_path)
+    except Exception:
+        os.unlink(tmp_path)
+        raise
 HEADER_FONT = Font(bold=True)
 THIN_SIDE = Side(style="thin")
 THIN_BORDER = Border(left=THIN_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
@@ -156,3 +214,4 @@ def write_document(result: DocumentResult, settings: ConversionSettings, output_
         first_sheet.cell(row=1, column=1, value="Таблицы и текст не обнаружены")
 
     wb.save(output_path)
+    _fix_comment_vml_drawings(output_path)

@@ -109,6 +109,38 @@ def test_uncertain_cell_gets_yellow_fill_and_comment(tmp_path):
     assert "Требуется ручная проверка" in cell.comment.text
 
 
+def test_uncertain_cell_comment_vml_uses_excel_compatible_prefixes(tmp_path):
+    """openpyxl writes VML comment shapes with auto-generated ns0:/ns1:/ns2:
+    namespace prefixes, which Excel's legacy VML reader does not recognise
+    (it matches prefixes literally rather than by namespace URI), making
+    the file unreadable. write_document must rewrite them to the literal
+    v:/o:/x: prefixes real Excel/Microsoft-authored VML always uses.
+    """
+    import zipfile
+
+    cells = [_cell("42", 0, 0, is_uncertain=True, comment="Требуется ручная проверка (уверенность распознавания: 50%)")]
+    table = TypedTable(n_rows=1, n_cols=1, cells=cells, page_index=0, table_index_on_page=0, source="ocr-lines")
+    result = DocumentResult(
+        source_pdf="x.pdf",
+        page_count=1,
+        pages=[PageOutcome(page_index=0, page_kind="scanned", extraction_method="ocr", tables=[table])],
+        tables=[table],
+    )
+    settings = ConversionSettings()
+    out = tmp_path / "out.xlsx"
+    write_document(result, settings, str(out))
+
+    with zipfile.ZipFile(out) as archive:
+        vml = archive.read("xl/drawings/commentsDrawing1.vml").decode("utf-8")
+
+    assert "ns0:" not in vml and "ns1:" not in vml and "ns2:" not in vml
+    assert 'xmlns:v="urn:schemas-microsoft-com:vml"' in vml
+    assert 'xmlns:o="urn:schemas-microsoft-com:office:office"' in vml
+    assert 'xmlns:x="urn:schemas-microsoft-com:office:excel"' in vml
+    assert "<v:shape" in vml
+    assert "<x:ClientData" in vml
+
+
 def test_highlight_disabled_suppresses_fill(tmp_path):
     cells = [_cell("42", 0, 0, is_uncertain=True, comment="Требуется ручная проверка")]
     table = TypedTable(n_rows=1, n_cols=1, cells=cells, page_index=0, table_index_on_page=0, source="ocr-lines")
