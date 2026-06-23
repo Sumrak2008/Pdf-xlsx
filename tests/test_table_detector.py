@@ -15,6 +15,7 @@ gave them away:
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from pdfxlsx.core import ocr_engine, paths, table_detector
@@ -82,6 +83,77 @@ def test_grid_ignores_spurious_line_from_aligned_text_glyphs(make_table_pdf, ren
     assert table.n_cols == 5
     for cell in table.cells:
         assert cell.row_span == 1 or (cell.row == 4 and cell.col_span == 2)
+
+
+def test_grid_keeps_row_divider_partly_hidden_by_a_merged_cell(make_table_pdf, render_page):
+    """Regression: a row divider that only crosses the table's *un-merged*
+    columns (because some other column in that row spans several rows) used
+    to be discarded as "spurious" for covering less than half the table
+    width, even though it is a real ruled line. That silently destroyed the
+    internal grid for any table using row-spanning merges - exactly the
+    layout of the real-world scanned form that surfaced this bug - and
+    glued the de-duplicated rows' text together into one garbled cell
+    (e.g. "1 2 3", "10 20 30") instead of keeping them separate.
+    """
+    _configure_ocr()
+    pdf = make_table_pdf(
+        rows=[
+            ["Описание", "A", "B", "C", "D"],
+            ["Труба ГС-1", "1", "10", "100", "X"],
+            ["Труба ГС-1", "2", "20", "200", "Y"],
+            ["Труба ГС-1", "3", "30", "300", "Z"],
+        ],
+        spans=[((0, 1), (0, 3))],
+        col_widths=[210, 25, 25, 25, 25],
+    )
+    image = render_page(pdf, dpi=300)
+    table = table_detector.extract_table_from_grid(image, lang="rus+eng", dpi=300)
+    assert table is not None
+    assert table.n_rows == 4
+    assert table.n_cols == 5
+    merged = next(c for c in table.cells if c.row == 1 and c.col == 0)
+    assert merged.row_span == 3
+    by_pos = {(c.row, c.col): c.text for c in table.cells}
+    assert by_pos[(1, 1)] == "1"
+    assert by_pos[(2, 1)] == "2"
+    assert by_pos[(3, 1)] == "3"
+
+
+def test_non_rectangular_merge_group_falls_back_to_unmerged_cells():
+    """Regression: a missing divider between (0,0)/(0,1) plus a separate
+    missing divider between (0,1)/(1,1) chains all three into one union-find
+    group via transitivity, even though that group is L-shaped, not a
+    rectangle. Excel/openpyxl can only represent rectangular merges, so
+    collapsing it into one cell with a row_span/col_span bounding box would
+    claim (1,0) too - a cell it never actually swallowed - leading the
+    writer to either crash (writing into a cell already inside another
+    merge) or silently overlap two cells' worth of text. Each member of a
+    non-rectangular group must come back out as its own independent cell.
+    """
+    row_ys = [0, 10, 20, 30]
+    col_xs = [0, 10, 20, 30]
+    horizontal_mask = np.zeros((31, 31), dtype=np.uint8)
+    vertical_mask = np.zeros((31, 31), dtype=np.uint8)
+
+    # Vertical divider between col0/col1: absent for row band 0 only, so
+    # (0,0) and (0,1) merge; present for every other row band.
+    vertical_mask[10:30, 10] = 255
+    # Vertical divider between col1/col2: present everywhere (no merges).
+    vertical_mask[0:30, 20] = 255
+
+    # Horizontal divider between row0/row1: absent for column band 1 only,
+    # so (0,1) and (1,1) merge; present for every other column band.
+    horizontal_mask[10, 0:10] = 255
+    horizontal_mask[10, 20:30] = 255
+    # Horizontal divider between row1/row2: present everywhere.
+    horizontal_mask[20, 0:30] = 255
+
+    cells = table_detector._build_cells_with_merges(horizontal_mask, vertical_mask, row_ys, col_xs)
+
+    assert len(cells) == 9
+    assert all(c.row_span == 1 and c.col_span == 1 for c in cells)
+    positions = {(c.row, c.col) for c in cells}
+    assert positions == {(r, c) for r in range(3) for c in range(3)}
 
 
 def test_borderless_table_via_word_clustering(make_borderless_pdf, render_page):

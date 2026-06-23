@@ -105,29 +105,47 @@ def detect_grid(image: Image.Image, dpi: int = DEFAULT_DPI) -> tuple[list[int], 
     return sorted(row_ys), sorted(col_xs)
 
 
+SPURIOUS_LINE_MIN_RUN_FRACTION = 0.15
+"""A candidate grid line is kept only if it has one unbroken run of "on"
+pixels at least this long, as a fraction of the table's full width/height.
+
+Earlier this checked total on-pixel coverage across the candidate's full
+span instead of the longest unbroken run. That works for a plain grid, but
+breaks as soon as the table has any row- or column-spanning merged cell:
+a real divider that only continues through the *un-merged* columns of its
+row covers less than half the table width, so the coverage-fraction check
+threw it out as "spurious" - which silently destroyed most of the internal
+grid for any table using merges (common in real-world scanned forms), and
+let `detect_grid` fall back to whatever coarse handful of lines survived.
+A genuine line, even a partial one, still shows up as one long contiguous
+run; incidental alignment of separate text glyphs only ever produces short,
+scattered runs - so checking run length instead of total coverage tells
+the two apart correctly in both cases.
+"""
+
+
+def _longest_run(segment: np.ndarray) -> int:
+    if segment.size == 0:
+        return 0
+    padded = np.concatenate(([False], segment, [False]))
+    edges = np.diff(padded.astype(np.int8))
+    starts = np.where(edges == 1)[0]
+    ends = np.where(edges == -1)[0]
+    return int((ends - starts).max()) if len(starts) else 0
+
+
 def _filter_spurious_lines(
     horizontal_mask: np.ndarray, vertical_mask: np.ndarray, row_ys: list[int], col_xs: list[int]
 ) -> tuple[list[int], list[int]]:
-    """Drop candidate grid lines that don't actually span the table.
-
-    A genuine ruled line runs (nearly) the full width/height of the table;
-    a stray surviving run from text glyphs covers only a sliver of it. This
-    re-checks each candidate's coverage across the table's full extent
-    (rather than just "enough absolute on-pixels somewhere"), which is what
-    actually distinguishes the two cases.
-    """
+    """Drop candidate grid lines that are just incidental text-glyph
+    alignment rather than an actual ruled line (see
+    `SPURIOUS_LINE_MIN_RUN_FRACTION`)."""
     col_min, col_max = col_xs[0], col_xs[-1]
     row_min, row_max = row_ys[0], row_ys[-1]
-    kept_rows = [
-        y
-        for y in row_ys
-        if _segment_line_presence(horizontal_mask, y, col_min, col_max, vertical=False) >= LINE_PRESENCE_THRESHOLD
-    ]
-    kept_cols = [
-        x
-        for x in col_xs
-        if _segment_line_presence(vertical_mask, x, row_min, row_max, vertical=True) >= LINE_PRESENCE_THRESHOLD
-    ]
+    row_threshold = SPURIOUS_LINE_MIN_RUN_FRACTION * (col_max - col_min)
+    col_threshold = SPURIOUS_LINE_MIN_RUN_FRACTION * (row_max - row_min)
+    kept_rows = [y for y in row_ys if _longest_run(horizontal_mask[y, col_min:col_max] > 0) >= row_threshold]
+    kept_cols = [x for x in col_xs if _longest_run(vertical_mask[row_min:row_max, x] > 0) >= col_threshold]
     return kept_rows, kept_cols
 
 
@@ -194,6 +212,19 @@ def _build_cells_with_merges(
         cols = [m[1] for m in members]
         r0, r1 = min(rows), max(rows)
         c0, c1 = min(cols), max(cols)
+        if len(members) != (r1 - r0 + 1) * (c1 - c0 + 1):
+            # A handful of scattered missing-divider edges can chain
+            # otherwise-unrelated cells together through union-find's
+            # transitive closure into a non-rectangular blob. Excel/openpyxl
+            # can only represent rectangular merges, so treating this as one
+            # merged cell would either crash the writer (it tries to write
+            # into a coordinate already swallowed by an invalid merge) or
+            # silently claim cells it doesn't actually cover. Falling back to
+            # one independent, unmerged cell per grid position is always
+            # representable and never overlaps a neighbour.
+            for r, c in members:
+                cells.append(RawCell(text="", row=r, col=c, confidence=100.0, source="ocr"))
+            continue
         cells.append(
             RawCell(
                 text="",
