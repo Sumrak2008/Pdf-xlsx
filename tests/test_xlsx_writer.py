@@ -263,3 +263,27 @@ def test_no_content_produces_placeholder_sheet(tmp_path):
     wb = load_workbook(out)
     assert len(wb.sheetnames) == 1
     assert wb.active.cell(row=1, column=1).value
+
+
+def test_content_types_is_first_zip_entry(tmp_path):
+    """openpyxl writes [Content_Types].xml as the last zip entry (it has to
+    know every other part before compiling the manifest). Real Excel always
+    writes it first, and some stricter readers expect that. write_document
+    must reorder the saved package so it leads, even for documents that
+    never go through the VML-comment post-processing path.
+    """
+    import zipfile
+
+    table = _simple_table(page_index=0)
+    result = DocumentResult(
+        source_pdf="x.pdf",
+        page_count=1,
+        pages=[PageOutcome(page_index=0, page_kind="text", extraction_method="direct", tables=[table])],
+        tables=[table],
+    )
+    settings = ConversionSettings()
+    out = tmp_path / "out.xlsx"
+    write_document(result, settings, str(out))
+
+    with zipfile.ZipFile(out) as archive:
+        assert archive.namelist()[0] == "[Content_Types].xml"

@@ -58,22 +58,35 @@ def _canonicalize_vml_prefixes(vml_bytes: bytes) -> bytes:
     return text.encode("utf-8")
 
 
-def _fix_comment_vml_drawings(xlsx_path: str) -> None:
-    """Rewrite VML comment-drawing prefixes in an already-saved workbook.
+def _reordered_for_excel(names: list[str]) -> list[str]:
+    """Real Excel/Microsoft-authored .xlsx files always write
+    `[Content_Types].xml` as the first zip entry. openpyxl writes it last
+    (it has to know every other part before it can compile the manifest),
+    which is legal per the OPC spec but some stricter readers - notably
+    mobile Office apps, which tend to use leaner streaming zip/OOXML
+    readers - expect to find it immediately and reject the package if it
+    isn't there yet when they start parsing. Moving it to the front costs
+    nothing and matches what every Microsoft-authored file actually does.
+    """
+    if not names or names[0] == "[Content_Types].xml":
+        return names
+    return ["[Content_Types].xml"] + [n for n in names if n != "[Content_Types].xml"]
 
-    Must run as a post-processing pass after `wb.save()`: openpyxl's own
-    comment/VML writer is what produces the malformed prefixes, and it
-    offers no hook to influence that part of its serialization.
+
+def _postprocess_workbook_package(xlsx_path: str) -> None:
+    """Rewrite the just-saved .xlsx to fix quirks of openpyxl's own zip/XML
+    serialization that real Excel readers (especially mobile ones) are
+    stricter about than the OPC/OOXML specs technically require.
     """
     with zipfile.ZipFile(xlsx_path, "r") as archive:
         names = archive.namelist()
-        if not any(name.startswith("xl/drawings/commentsDrawing") for name in names):
-            return
         contents = {name: archive.read(name) for name in names}
 
     for name, data in contents.items():
         if name.startswith("xl/drawings/commentsDrawing") and name.endswith(".vml"):
             contents[name] = _canonicalize_vml_prefixes(data)
+
+    ordered_names = _reordered_for_excel(list(contents.keys()))
 
     # mkstemp() creates the temp file with mode 0600 (owner read/write only),
     # and os.replace() carries that mode over onto xlsx_path - silently
@@ -87,8 +100,8 @@ def _fix_comment_vml_drawings(xlsx_path: str) -> None:
     os.close(fd)
     try:
         with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as archive:
-            for name, data in contents.items():
-                archive.writestr(name, data)
+            for name in ordered_names:
+                archive.writestr(name, contents[name])
         os.chmod(tmp_path, original_mode)
         os.replace(tmp_path, xlsx_path)
     except Exception:
@@ -222,4 +235,4 @@ def write_document(result: DocumentResult, settings: ConversionSettings, output_
         first_sheet.cell(row=1, column=1, value="Таблицы и текст не обнаружены")
 
     wb.save(output_path)
-    _fix_comment_vml_drawings(output_path)
+    _postprocess_workbook_package(output_path)
