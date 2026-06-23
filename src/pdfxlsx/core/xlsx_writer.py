@@ -75,6 +75,13 @@ def _fix_comment_vml_drawings(xlsx_path: str) -> None:
         if name.startswith("xl/drawings/commentsDrawing") and name.endswith(".vml"):
             contents[name] = _canonicalize_vml_prefixes(data)
 
+    # mkstemp() creates the temp file with mode 0600 (owner read/write only),
+    # and os.replace() carries that mode over onto xlsx_path - silently
+    # downgrading it from wb.save()'s normal, broadly-readable permissions.
+    # Restore the original mode so callers/services reading the file back
+    # don't lose access.
+    original_mode = os.stat(xlsx_path).st_mode
+
     out_dir = os.path.dirname(xlsx_path) or "."
     fd, tmp_path = tempfile.mkstemp(suffix=".xlsx", dir=out_dir)
     os.close(fd)
@@ -82,6 +89,7 @@ def _fix_comment_vml_drawings(xlsx_path: str) -> None:
         with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as archive:
             for name, data in contents.items():
                 archive.writestr(name, data)
+        os.chmod(tmp_path, original_mode)
         os.replace(tmp_path, xlsx_path)
     except Exception:
         os.unlink(tmp_path)

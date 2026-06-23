@@ -141,6 +141,40 @@ def test_uncertain_cell_comment_vml_uses_excel_compatible_prefixes(tmp_path):
     assert "<x:ClientData" in vml
 
 
+def test_vml_fix_does_not_downgrade_file_permissions(tmp_path):
+    """The VML-prefix fix rewrites the saved workbook by building a temp
+    file via tempfile.mkstemp() and os.replace()-ing it over the output.
+    mkstemp() defaults to mode 0600 (owner-only), which os.replace() would
+    otherwise carry over onto the final .xlsx, leaving it unreadable by
+    anything other than the process that wrote it.
+    """
+    import stat
+
+    cells = [_cell("42", 0, 0, is_uncertain=True, comment="Требуется ручная проверка")]
+    table = TypedTable(n_rows=1, n_cols=1, cells=cells, page_index=0, table_index_on_page=0, source="ocr-lines")
+    result = DocumentResult(
+        source_pdf="x.pdf",
+        page_count=1,
+        pages=[PageOutcome(page_index=0, page_kind="scanned", extraction_method="ocr", tables=[table])],
+        tables=[table],
+    )
+    settings = ConversionSettings()
+    out = tmp_path / "out.xlsx"
+    write_document(result, settings, str(out))
+
+    plain_table = _simple_table(page_index=0)
+    plain_result = DocumentResult(
+        source_pdf="y.pdf",
+        page_count=1,
+        pages=[PageOutcome(page_index=0, page_kind="text", extraction_method="direct", tables=[plain_table])],
+        tables=[plain_table],
+    )
+    plain_out = tmp_path / "plain.xlsx"
+    write_document(plain_result, settings, str(plain_out))
+
+    assert stat.S_IMODE(out.stat().st_mode) == stat.S_IMODE(plain_out.stat().st_mode)
+
+
 def test_highlight_disabled_suppresses_fill(tmp_path):
     cells = [_cell("42", 0, 0, is_uncertain=True, comment="Требуется ручная проверка")]
     table = TypedTable(n_rows=1, n_cols=1, cells=cells, page_index=0, table_index_on_page=0, source="ocr-lines")
