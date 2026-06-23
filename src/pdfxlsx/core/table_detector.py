@@ -280,6 +280,56 @@ def _erase_grid_lines(image: Image.Image, horizontal_mask: np.ndarray, vertical_
     return np_image
 
 
+ROTATION_RETRY_MIN_CONFIDENCE = 80.0
+"""Cells whose first (horizontal) OCR pass scores at or above this average
+per-word confidence are accepted as-is, with no rotated re-read attempted.
+Re-trying every cell would roughly double or triple total OCR time for no
+benefit on the vast majority of ordinary horizontal cells, which already
+read cleanly the first time.
+"""
+
+ROTATION_RETRY_MIN_IMPROVEMENT = 1.2
+"""A rotated re-read only replaces the original horizontal read when its
+score exceeds the original's by at least this factor. Genuinely 90-degree
+rotated header text (vertical column labels, common in Russian technical
+tables) scores at least 1.2x higher (often 2x+) once read in the correct
+orientation; a merely noisy-but-correctly-oriented cell never sees an
+improvement anywhere near that, so this margin keeps a correct low-confidence
+horizontal read from being displaced by a coincidentally higher-scoring
+rotated misread.
+"""
+
+ROTATION_RETRY_MIN_CROP_PX = 25
+
+
+def _ocr_score(words: list[Word]) -> float:
+    return sum(len(w.text) * w.confidence for w in words)
+
+
+def _best_orientation_words(crop: Image.Image, words: list[Word], lang: str) -> list[Word]:
+    """Re-OCR `crop` rotated +-90 degrees if the original (horizontal) read
+    looks weak, and keep whichever orientation scores best.
+
+    Handles column headers printed as vertical text (e.g. "Температура,
+    °С" running bottom-to-top) without paying the cost of a second and
+    third OCR pass on every ordinary horizontal cell.
+    """
+    if crop.width < ROTATION_RETRY_MIN_CROP_PX or crop.height < ROTATION_RETRY_MIN_CROP_PX:
+        return words
+    avg_confidence = (sum(w.confidence for w in words) / len(words)) if words else 0.0
+    if avg_confidence >= ROTATION_RETRY_MIN_CONFIDENCE:
+        return words
+    best_words = words
+    best_score = _ocr_score(words)
+    for degrees in (90, 270):
+        rotated_words = ocr_engine.ocr_words(crop.rotate(-degrees, expand=True), lang=lang, psm=6)
+        rotated_score = _ocr_score(rotated_words)
+        if rotated_score > best_score * ROTATION_RETRY_MIN_IMPROVEMENT:
+            best_words = rotated_words
+            best_score = rotated_score
+    return best_words
+
+
 def extract_table_from_grid(image: Image.Image, lang: str, dpi: int = DEFAULT_DPI) -> RawTable | None:
     grid = detect_grid(image, dpi=dpi)
     if grid is None:
@@ -301,6 +351,7 @@ def extract_table_from_grid(image: Image.Image, lang: str, dpi: int = DEFAULT_DP
             continue
         crop = Image.fromarray(np_image[y0:y1, x0:x1])
         words = ocr_engine.ocr_words(crop, lang=lang, psm=6)
+        words = _best_orientation_words(crop, words, lang)
         cell.text = " ".join(w.text for w in words).strip()
         cell.confidence = (sum(w.confidence for w in words) / len(words)) if words else 0.0
 

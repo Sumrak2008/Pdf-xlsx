@@ -119,6 +119,34 @@ def test_grid_keeps_row_divider_partly_hidden_by_a_merged_cell(make_table_pdf, r
     assert by_pos[(3, 1)] == "3"
 
 
+def test_vertical_header_text_is_recovered_via_rotation():
+    """Regression: column headers in real-world technical tables are often
+    printed as vertical (90-degree rotated) text to fit narrow columns
+    (e.g. "Категория, группа" running bottom-to-top). OCR'd in the cell's
+    native horizontal orientation this reads as nonsense glyph soup, even
+    though every individual cell's structure (row/col position, span) is
+    correct - only the recognized text is garbage. Retrying the cell
+    rotated +-90 degrees and keeping whichever orientation scores best
+    recovers the real text.
+    """
+    _configure_ocr()
+    from pathlib import Path
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    fonts_dir = Path(__file__).resolve().parent.parent / "tools" / "fonts"
+    font = ImageFont.truetype(str(fonts_dir / "DejaVuSans.ttf"), 28)
+    horizontal = Image.new("RGB", (420, 60), "white")
+    ImageDraw.Draw(horizontal).text((10, 10), "Категория, группа", font=font, fill="black")
+    vertical = horizontal.rotate(90, expand=True)
+
+    native_words = ocr_engine.ocr_words(vertical, lang="rus+eng", psm=6)
+    best_words = table_detector._best_orientation_words(vertical, native_words, lang="rus+eng")
+    recovered = " ".join(w.text for w in best_words)
+    assert "Категория" in recovered
+    assert "группа" in recovered
+
+
 def test_non_rectangular_merge_group_falls_back_to_unmerged_cells():
     """Regression: a missing divider between (0,0)/(0,1) plus a separate
     missing divider between (0,1)/(1,1) chains all three into one union-find
